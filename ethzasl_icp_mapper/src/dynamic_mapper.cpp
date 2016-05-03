@@ -56,6 +56,8 @@ class Mapper
 	
 	// Publishers
 	ros::Publisher mapPub;
+	ros::Publisher staticMapPub;
+	ros::Publisher dynamicMapPub;
 	ros::Publisher outlierPub;
 	ros::Publisher odomPub;
 	ros::Publisher odomErrorPub;
@@ -79,6 +81,8 @@ class Mapper
 	PM::DataPointsFilters mapPreFilters;
 	PM::DataPointsFilters mapPostFilters;
 	PM::DataPoints *mapPointCloud;
+	
+
 	PM::ICPSequence icp;
 	unique_ptr<PM::Transformation> transformation;
 	
@@ -121,6 +125,10 @@ class Mapper
 	const float maxDyn; //!< ratio. Threshold for which a point will stay dynamic
 	const float maxDistNewPoint; //!< in meter. Distance at which a new point will be added in the global map.
 
+	const float staticThreshold; //static threshold, points with higher probability get published in static_map_cutoff
+	const float dynamicThreshold; //dynamic threshold, points with higher probability get published in dynamic_map_cutoff
+	const float height;
+
 
 	
 
@@ -144,6 +152,9 @@ protected:
 	void processCloud(unique_ptr<DP> cloud, const std::string& scannerFrame, const ros::Time& stamp, uint32_t seq);
 	void processNewMapIfAvailable();
 	void setMap(DP* newPointCloud);
+	void publishStaticMap(DP* pointCloud);
+	void publishDynamicMap(DP* pointCloud);
+	DP removeCeiling(DP* pointCloud);
 	DP* updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting);
 	void waitForMapBuildingCompleted();
 	
@@ -186,6 +197,9 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	mapElevation(getParam<double>("mapElevation", 0)),
 	priorStatic(getParam<double>("priorStatic", 0.5)),
 	priorDyn(getParam<double>("priorDyn", 0.5)),
+	staticThreshold(getParam<float>("staticThreshold", 0.5)),
+	dynamicThreshold(getParam<float>("dynamicThreshold", 0.5)),
+	height(getParam<float>("height", 0)),
 	maxAngle(getParam<double>("maxAngle", 0.02)),
 	eps_a(getParam<double>("eps_a", 0.05)),
 	eps_d(getParam<double>("eps_d", 0.02)),
@@ -196,7 +210,7 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	TOdomToMap(PM::TransformationParameters::Identity(4, 4)),
 	publishStamp(ros::Time::now()),
   tfListener(ros::Duration(30)),
-	eps(0.0001)
+  	eps(getParam<float>("eps", 0.0001))
 {
 
 	// Ensure proper states
@@ -289,6 +303,8 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	if (getParam<bool>("subscribe_cloud", true))
 		cloudSub = n.subscribe("cloud_in", inputQueueSize, &Mapper::gotCloud, this);
 	mapPub = n.advertise<sensor_msgs::PointCloud2>("point_map", 2, true);
+	staticMapPub = n.advertise<sensor_msgs::PointCloud2>("static_map_cutoff", 2, true);
+	dynamicMapPub = n.advertise<sensor_msgs::PointCloud2>("dynamic_map_cutoff", 2, true);
 	outlierPub = n.advertise<sensor_msgs::PointCloud2>("outliers", 2, true);
 	odomPub = n.advertise<nav_msgs::Odometry>("icp_odom", 50, true);
 	odomErrorPub = n.advertise<nav_msgs::Odometry>("icp_error_odom", 50, true);
@@ -485,23 +501,23 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 		PM::TransformationParameters Ticp;
 		Ticp = icp(*newPointCloud, TscannerToMap);
 
-		// ISER
-		{
-		// extract corrections
-		PM::TransformationParameters Tdelta = Ticp * TscannerToMap.inverse();
+		// // ISER
+		// {
+		// // extract corrections
+		// PM::TransformationParameters Tdelta = Ticp * TscannerToMap.inverse();
 		
-		// remove roll and pitch
-		Tdelta(2,0) = 0; 
-		Tdelta(2,1) = 0; 
-		Tdelta(2,2) = 1; 
-		Tdelta(0,2) = 0; 
-		Tdelta(1,2) = 0;
-		Tdelta(2,3) = 0; //z
-		Tdelta.block(0,0,3,3) = transformation->correctParameters(Tdelta.block(0,0,3,3));
+		// // remove roll and pitch
+		// Tdelta(2,0) = 0; 
+		// Tdelta(2,1) = 0; 
+		// Tdelta(2,2) = 1; 
+		// Tdelta(0,2) = 0; 
+		// Tdelta(1,2) = 0;
+		// Tdelta(2,3) = 0; //z
+		// Tdelta.block(0,0,3,3) = transformation->correctParameters(Tdelta.block(0,0,3,3));
 
-		Ticp = Tdelta*TscannerToMap;
+		// Ticp = Tdelta*TscannerToMap;
 
-		}
+		// }
 
 		ROS_DEBUG_STREAM("Ticp:\n" << Ticp);
 		
@@ -602,15 +618,99 @@ void Mapper::setMap(DP* newPointCloud)
 	
 	// set new map
 	mapPointCloud = newPointCloud;
+
 	cerr << "copying map to ICP" << endl;
 	icp.setMap(*mapPointCloud);
 	
+	*mapPointCloud = removeCeiling(mapPointCloud);
 	
 	cerr << "publishing map" << endl;
 	// Publish map point cloud
 	// FIXME this crash when used without descriptor
 	if (mapPub.getNumSubscribers())
 		mapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*mapPointCloud, mapFrame, mapCreationTime));
+	
+
+	publishStaticMap(mapPointCloud);
+	publishDynamicMap(mapPointCloud);
+}
+
+void Mapper::publishStaticMap(DP* pointCloud)
+{
+	//publishes static map, all points that have a probability of static higher than staticThreshold
+
+	DP staticMap = pointCloud->createSimilarEmpty();
+	int pointCount = pointCloud->features.cols();
+
+	int staticPointIndex = 0;
+	for (int i=0; i < pointCount; i++)
+	{
+		bool add = pointCloud->getDescriptorViewByName("probabilityStatic").col(i).norm() > staticThreshold;
+		if (add)
+		{
+			staticMap.setColFrom(staticPointIndex++, *pointCloud, i);
+		}
+		
+	}
+	staticMap.conservativeResize(staticPointIndex);
+
+	staticMap = removeCeiling(&staticMap);
+
+	ROS_INFO_STREAM("Num of all points: " << pointCount << ", Num of static points above " << staticThreshold << ": " << staticPointIndex);
+	
+	staticMapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(staticMap, mapFrame, mapCreationTime));
+}
+
+void Mapper::publishDynamicMap(DP* pointCloud)
+{
+	//publishes static map, all points that have a probability of static higher than staticThreshold
+
+	DP dynamicMap = pointCloud->createSimilarEmpty();
+	int pointCount = pointCloud->features.cols();
+
+	int dynamicPointIndex = 0;
+	for (int i=0; i < pointCount; i++)
+	{
+		bool add = pointCloud->getDescriptorViewByName("probabilityDynamic").col(i).norm() > dynamicThreshold;
+		if (add)
+		{
+			dynamicMap.setColFrom(dynamicPointIndex++, *pointCloud, i);
+		}
+		
+	}
+	dynamicMap.conservativeResize(dynamicPointIndex);
+
+	dynamicMap = removeCeiling(&dynamicMap);
+
+	ROS_INFO_STREAM("Num of all points: " << pointCount << ", Num of dynamic points above " << dynamicThreshold << ": " << dynamicPointIndex);
+	
+	dynamicMapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(dynamicMap, mapFrame, mapCreationTime));
+}
+
+Mapper::DP Mapper::removeCeiling(DP* pointCloud)
+{
+	if (height == 0.0) return *pointCloud;
+
+	DP noCeilingMap = pointCloud->createSimilarEmpty();
+	int pointCount = pointCloud->features.cols();
+
+	int noCeilingPointIndex = 0;
+	for (int i=0; i < pointCount; i++)
+	{
+		bool add = pointCloud->features.row(2).col(i).norm() < height;
+		
+		if (add)
+		{
+			ROS_INFO_STREAM("Height/ceiling cutoff is " << pointCloud->features.row(2).col(i).norm());
+			noCeilingMap.setColFrom(noCeilingPointIndex++, *pointCloud, i);
+		}
+		
+	}
+	noCeilingMap.conservativeResize(noCeilingPointIndex);
+
+	ROS_INFO_STREAM("Num of all points: " << pointCount << ", Num of ceiling cutouts below " << height << ": " << noCeilingPointIndex);
+
+	return noCeilingMap;
 }
 
 Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting)
@@ -637,9 +737,9 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 		newPointCloud->addDescriptor("probabilityDynamic", PM::Matrix::Constant(1, newPointCloud->features.cols(), priorDyn));
 	}
 	
-	if(newPointCloud->descriptorExists("dynamic_ratio") == false)
+	if(newPointCloud->descriptorExists("dynamic_static") == false)
 	{
-		newPointCloud->addDescriptor("dynamic_ratio", PM::Matrix::Zero(1, newPointCloud->features.cols()));
+		newPointCloud->addDescriptor("dynamic_static", PM::Matrix::Zero(1, newPointCloud->features.cols()));
 	}
 
 	if (!updateExisting)
@@ -749,16 +849,16 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 
 	DP::View viewOnProbabilityStatic = mapPointCloud->getDescriptorViewByName("probabilityStatic");
 	DP::View viewOnProbabilityDynamic = mapPointCloud->getDescriptorViewByName("probabilityDynamic");
-	DP::View viewOnDynamicRatio = mapPointCloud->getDescriptorViewByName("dynamic_ratio");
+	DP::View viewOnDynamicStatic = mapPointCloud->getDescriptorViewByName("dynamic_static");
 	
 	DP::View viewOn_normals_map = mapPointCloud->getDescriptorViewByName("normals");
 	DP::View viewOn_Msec_map = mapPointCloud->getDescriptorViewByName("stamps_Msec");
 	DP::View viewOn_sec_map = mapPointCloud->getDescriptorViewByName("stamps_sec");
 	DP::View viewOn_nsec_map = mapPointCloud->getDescriptorViewByName("stamps_nsec");
 	
-	
 
-	viewOnDynamicRatio = PM::Matrix::Zero(1, mapPtsCount);
+	int loopCount = 0;
+
 	for(int i=0; i < mapCutPtsCount; i++)
 	{
 		if(dists(i) != numeric_limits<float>::infinity())
@@ -783,10 +883,12 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 			//const float viewAngle = acos(normal_map.normalized().dot(obsDir.normalized()));
 			//const float normalAngle = acos(normal_map.normalized().dot(normal_read.normalized()));
 			
+			
+			// WEIGHT DEFINITIONS
 			// Weight for dynamic elements
 			const float w_v = eps + (1 - eps)*fabs(normal_map.dot(mapPt_n));
 			//const float w_d1 = 1 + eps - acos(readPt.normalized().dot(mapPt_n))/maxAngle;
-			const float w_d1 =  eps + (1 - eps)*(1 - sqrt(dists(i))/maxAngle);
+			const float w_d1 =  eps + (1 - eps)*(1 - sqrt(dists(i))/maxAngle); 
 			
 			
 			const float offset = delta - eps_d;
@@ -803,8 +905,9 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 				}
 			}
 
+
 			float w_p2 = eps;
-			if(delta < eps_d)
+			if(delta < eps_d) 
 			{
 				w_p2 = 1;
 			}
@@ -816,12 +919,20 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 				}
 			}
 
-			//cerr << "readPt.norm(): "<< readPt.norm()  << "mapPt.norm(): "<< mapPt.norm() << ", w_p2: " << w_p2 << ", w_d2: " << w_d2 << endl;
+			// cout << "Point number: " << i << endl;
+			// cout << "First if: " << (delta < eps_d) << " " << (mapPt.norm() > readPt.norm()) << endl;
+			// cout << "Second if: " << (delta < eps_d) << endl;
+			// cout << "Probability association if: " << ((readPt.norm() + eps_d + d_max) >= mapPt.norm()) << endl;
+			// cout << "readPt.norm(): "<< readPt.norm()  << ", mapPt.norm(): "<< mapPt.norm() << ", w_p2: " << w_p2 << ", w_d2: " << w_d2 << endl;
+			// cout << "delta: " << delta << ", d_max: " << d_max << ", w_v: " << w_v << ", w_d1: " << w_d1 << ", offset: " << offset << endl;
 		
 
+
+			// PROBABILITY ASSOCIATION
 			// We don't update point behind the reading
-			if((readPt.norm() + eps_d + d_max) >= mapPt.norm())
+			if((readPt.norm() + eps_d + d_max) >= mapPt.norm()) 
 			{
+				loopCount++;
 				const float lastDyn = viewOnProbabilityDynamic(0,mapId);
 				const float lastStatic = viewOnProbabilityStatic(0, mapId);
 
@@ -840,30 +951,60 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 				//const float maxDyn = 0.98; // ISER 14
 
 				//Lock dynamic point to stay dynamic under a threshold
-				if(lastDyn < maxDyn)
-				{
-					viewOnProbabilityDynamic(0,mapId) = c1*lastDyn + c2*w_d2*((1 - alpha)*lastStatic + beta*lastDyn);
-					viewOnProbabilityStatic(0, mapId) = c1*lastStatic + c2*w_p2*(alpha*lastStatic + (1 - beta)*lastDyn);
-				}
-				else
-				{
-					viewOnProbabilityStatic(0,mapId) = eps;
-					viewOnProbabilityDynamic(0,mapId) = 1-eps;
-				}
-				
-				
-				
-				// normalization
-				const float sumZ = viewOnProbabilityDynamic(0,mapId) + viewOnProbabilityStatic(0, mapId);
-				assert(sumZ >= eps);	
-				
-				viewOnProbabilityDynamic(0,mapId) /= sumZ;
-				viewOnProbabilityStatic(0,mapId) /= sumZ;
-				
-				//viewOnDynamicRatio(0,mapId) =viewOnProbabilityDynamic(0, mapId);
-				viewOnDynamicRatio(0,mapId) = w_d2;
 
-				//viewOnDynamicRatio(0,mapId) =	w_d2;
+
+				//TRY1
+				// if (delta < (eps_d + d_max)) {
+				// 	viewOnProbabilityStatic(0,mapId) = lastStatic + (1 - lastStatic) * (1 - delta / (eps_d + d_max)) * 0.4;
+				// }
+				// else {
+				// 	viewOnProbabilityDynamic(0,mapId) = lastDyn + (1 - lastDyn) * 0.4;
+				// }
+
+
+				//TRY2 with shifted and scaled sigmoid: 1/(1+e^(-10*(x-0.5)))
+				// float sigmoid_der = (1484.13*pow(2.71828,(10*lastStatic)))/pow((148.413+pow(2.71828,(10*lastStatic))),2);
+
+				// if (delta < (eps_d + d_max)) {
+				// 	viewOnProbabilityStatic(0,mapId) = lastStatic + sigmoid_der*0.1;
+				// }
+				// else viewOnProbabilityStatic(0,mapId) = lastStatic - sigmoid_der*0.1;
+
+				// if (viewOnProbabilityStatic(0,mapId) > 0.99) viewOnProbabilityStatic(0,mapId) = 0.99;
+				// if (viewOnProbabilityStatic(0,mapId) < 0.01) viewOnProbabilityStatic(0,mapId) = 0.01;
+
+				// viewOnProbabilityDynamic(0,mapId) = 1 - viewOnProbabilityStatic(0,mapId);
+
+
+				//TRY3 weighted sigmoid
+				float distWeight, angleWeight, normalWeight;
+
+				if (delta < (eps_d + d_max)) {
+					distWeight = eps + (1 - eps) * (1 - (delta / (eps_d + d_max)));
+				}
+
+				angleWeight = w_d1;
+
+				normalWeight = w_v;
+
+				float sigmoid_der = (1484.13*pow(2.71828,(10*lastStatic)))/pow((148.413+pow(2.71828,(10*lastStatic))),2);
+
+				// assign probabilities
+				if (delta < (eps_d + d_max)) {
+					viewOnProbabilityStatic(0,mapId) = lastStatic + distWeight * angleWeight * sigmoid_der * 0.3;
+					viewOnDynamicStatic(0,mapId) = 1;
+				}
+				else {
+					viewOnProbabilityStatic(0,mapId) = lastStatic - angleWeight * normalWeight * sigmoid_der * 0.1;
+					viewOnDynamicStatic(0,mapId) = -1;
+				}
+
+				if (viewOnProbabilityStatic(0,mapId) > 0.99) viewOnProbabilityStatic(0,mapId) = 0.99;
+				if (viewOnProbabilityStatic(0,mapId) < 0.01) viewOnProbabilityStatic(0,mapId) = 0.01;
+
+				viewOnProbabilityDynamic(0,mapId) = 1 - viewOnProbabilityStatic(0,mapId);
+
+				
 
 				// Refresh time
 				viewOn_Msec_map(0,mapId) = viewOn_Msec_overlap(0,readId);	
@@ -874,6 +1015,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 
 		}
 	}
+	cout << "num of all points: " << mapCutPtsCount << ", num of probability updated points: " << loopCount <<endl << endl << endl;
 
 
 
@@ -944,10 +1086,10 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 	//no_overlap.addDescriptor("probabilityDynamic", PM::Matrix::Zero(1, no_overlap.features.cols()));
 	no_overlap.addDescriptor("probabilityDynamic", PM::Matrix::Constant(1, no_overlap.features.cols(), priorDyn));
 
-	no_overlap.addDescriptor("dynamic_ratio", PM::Matrix::Zero(1, no_overlap.features.cols()));
+	no_overlap.addDescriptor("dynamic_static", PM::Matrix::Zero(1, no_overlap.features.cols()));
 
 	// shrink the newPointCloud to the new information
-	*newPointCloud = no_overlap;
+	// *newPointCloud = no_overlap; //COMMENTED BY MARKO, NO SHRINKING OF MAPS
 	
 
 	

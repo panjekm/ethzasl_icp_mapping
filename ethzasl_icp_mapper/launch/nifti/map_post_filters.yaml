@@ -4,7 +4,6 @@
     keepNormals: 1
     keepDensities: 1
 - MaxDensityDataPointsFilter:
-    maxDensity: 1000
+    maxDensity: 10000
 - MaxPointCountDataPointsFilter:
     maxCount: 600000
-    prob: 0.7

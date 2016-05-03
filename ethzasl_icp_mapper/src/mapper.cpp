@@ -191,8 +191,6 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 		ROS_INFO_STREAM("No ICP config file given, using default");
 		icp.setDefault();
 	}
-	if (getParam<bool>("useROSLogger", false))
-		PointMatcherSupport::setLogger(new PointMatcherSupport::ROSLogger);
 	
 	if (ros::param::get("~inputFiltersConfig", configFileName))
 	{
@@ -265,10 +263,12 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 
 	// refreshing tf transform thread
 	publishThread = boost::thread(boost::bind(&Mapper::publishLoop, this, tfRefreshPeriod));
+	ROS_INFO_STREAM("Initialization/constructor/services&topics start in mapper.cpp");
 }
 
 Mapper::~Mapper()
 {
+	ROS_INFO_STREAM("Destructor in mapper.cpp");
 	#if BOOST_VERSION >= 104100
 	// wait for map-building thread
 	if (mapBuildingInProgress)
@@ -290,6 +290,7 @@ Mapper::~Mapper()
 
 void Mapper::gotScan(const sensor_msgs::LaserScan& scanMsgIn)
 {
+	ROS_INFO_STREAM("gotScan in mapper.cpp");
 	if(localizing)
 	{
 		const ros::Time endScanTime(scanMsgIn.header.stamp + ros::Duration(scanMsgIn.time_increment * (scanMsgIn.ranges.size() - 1)));
@@ -300,6 +301,7 @@ void Mapper::gotScan(const sensor_msgs::LaserScan& scanMsgIn)
 
 void Mapper::gotCloud(const sensor_msgs::PointCloud2& cloudMsgIn)
 {
+	ROS_INFO_STREAM("gotCloud in mapper.cpp");
 	if(localizing)
 	{
 		unique_ptr<DP> cloud(new DP(PointMatcher_ros::rosMsgToPointMatcherCloud<float>(cloudMsgIn)));
@@ -325,6 +327,7 @@ protected:
 
 void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scannerFrame, const ros::Time& stamp, uint32_t seq)
 {
+	ROS_INFO_STREAM("processCloud in mapper.cpp");
 	processingNewCloud = true;
 	BoolSetter stopProcessingSetter(processingNewCloud, false);
 
@@ -385,11 +388,11 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 	}
 
 
-	ROS_DEBUG_STREAM("TOdomToScanner(" << odomFrame<< " to " << scannerFrame << "):\n" << TOdomToScanner);
-	ROS_DEBUG_STREAM("TOdomToMap(" << odomFrame<< " to " << mapFrame << "):\n" << TOdomToMap);
+	ROS_INFO_STREAM("TOdomToScanner(" << odomFrame<< " to " << scannerFrame << "):\n" << TOdomToScanner);
+	ROS_INFO_STREAM("TOdomToMap(" << odomFrame<< " to " << mapFrame << "):\n" << TOdomToMap);
 		
 	const PM::TransformationParameters TscannerToMap = transformation->correctParameters(TOdomToMap * TOdomToScanner.inverse());
-	ROS_DEBUG_STREAM("TscannerToMap (" << scannerFrame << " to " << mapFrame << "):\n" << TscannerToMap);
+	ROS_INFO_STREAM("TscannerToMap (" << scannerFrame << " to " << mapFrame << "):\n" << TscannerToMap);
 	
 	// Ensure a minimum amount of point after filtering
 	const int ptsCount = newPointCloud->features.cols();
@@ -423,7 +426,7 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 
 		Ticp = icp(*newPointCloud, TscannerToMap);
 
-		ROS_DEBUG_STREAM("Ticp:\n" << Ticp);
+		ROS_INFO_STREAM("Ticp:\n" << Ticp);
 		
 		// Ensure minimum overlap between scans
 		const double estimatedOverlap = icp.errorMinimizer->getOverlap();
@@ -443,7 +446,7 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 		publishLock.unlock();
 		processingNewCloud = false;
 		
-		ROS_DEBUG_STREAM("TOdomToMap:\n" << TOdomToMap);
+		ROS_INFO_STREAM("TOdomToMap:\n" << TOdomToMap);
 
 		// Publish odometry
 		if (odomPub.getNumSubscribers())
@@ -504,6 +507,7 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 
 void Mapper::processNewMapIfAvailable()
 {
+	ROS_INFO_STREAM("processNewMapIfAvailable in mapper.cpp");
 	#if BOOST_VERSION >= 104100
 	if (mapBuildingInProgress && mapBuildingFuture.has_value())
 	{
@@ -516,6 +520,7 @@ void Mapper::processNewMapIfAvailable()
 
 void Mapper::setMap(DP* newPointCloud)
 {
+	ROS_INFO_STREAM("setMap in mapper.cpp");
 	// delete old map
 	if (mapPointCloud)
 		delete mapPointCloud;
@@ -532,6 +537,7 @@ void Mapper::setMap(DP* newPointCloud)
 
 Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting)
 {
+	ROS_INFO_STREAM("updateMap mapper.cpp");
 	timer t;
 	
 	// Correct new points using ICP result
@@ -555,6 +561,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 
 void Mapper::waitForMapBuildingCompleted()
 {
+	ROS_INFO_STREAM("waitForMapBuildingCompleted in mapper.cpp");
 	#if BOOST_VERSION >= 104100
 	if (mapBuildingInProgress)
 	{
@@ -567,9 +574,11 @@ void Mapper::waitForMapBuildingCompleted()
 
 void Mapper::publishLoop(double publishPeriod)
 {
+	ROS_INFO_STREAM("publishLoop mapper.cpp");
 	if(publishPeriod == 0)
 		return;
 	ros::Rate r(1.0 / publishPeriod);
+	ROS_INFO_STREAM("publishLoop, rate: " << 1.0/publishPeriod << " mapper.cpp");
 	while(ros::ok())
 	{
 		publishTransform();
@@ -590,6 +599,7 @@ void Mapper::publishTransform()
 
 bool Mapper::getPointMap(map_msgs::GetPointMap::Request &req, map_msgs::GetPointMap::Response &res)
 {
+	ROS_INFO_STREAM("getPointMap in mapper.cpp");
 	if (!mapPointCloud)
 		return false;
 	
@@ -600,6 +610,7 @@ bool Mapper::getPointMap(map_msgs::GetPointMap::Request &req, map_msgs::GetPoint
 
 bool Mapper::saveMap(map_msgs::SaveMap::Request &req, map_msgs::SaveMap::Response &res)
 {
+	ROS_INFO_STREAM("saveMap in mapper.cpp");
 	if (!mapPointCloud)
 		return false;
 	
@@ -619,6 +630,7 @@ bool Mapper::saveMap(map_msgs::SaveMap::Request &req, map_msgs::SaveMap::Respons
 
 bool Mapper::loadMap(ethzasl_icp_mapper::LoadMap::Request &req, ethzasl_icp_mapper::LoadMap::Response &res)
 {
+	ROS_INFO_STREAM("loadMap in mapper.cpp");
 	waitForMapBuildingCompleted();
 	
 	DP* cloud(new DP(DP::load(req.filename.data)));
@@ -638,6 +650,7 @@ bool Mapper::loadMap(ethzasl_icp_mapper::LoadMap::Request &req, ethzasl_icp_mapp
 
 bool Mapper::reset(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
 {
+	ROS_INFO_STREAM("reset in mapper.cpp");
 	waitForMapBuildingCompleted();
 	
 	// note: no need for locking as we do ros::spin(), to update if we go for multi-threading
@@ -652,6 +665,7 @@ bool Mapper::reset(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res
 
 bool Mapper::correctPose(ethzasl_icp_mapper::CorrectPose::Request &req, ethzasl_icp_mapper::CorrectPose::Response &res)
 {
+	ROS_INFO_STREAM("correctPose in mapper.cpp");
 	publishLock.lock();
 	TOdomToMap = PointMatcher_ros::odomMsgToEigenMatrix<float>(req.odom);
 	tfBroadcaster.sendTransform(PointMatcher_ros::eigenMatrixToStampedTransform<float>(TOdomToMap, mapFrame, odomFrame, ros::Time::now()));
@@ -662,6 +676,7 @@ bool Mapper::correctPose(ethzasl_icp_mapper::CorrectPose::Request &req, ethzasl_
 
 bool Mapper::setMode(ethzasl_icp_mapper::SetMode::Request &req, ethzasl_icp_mapper::SetMode::Response &res)
 {
+	ROS_INFO_STREAM("setMode in mapper.cpp");
 	// Impossible states
 	if(req.localize == false && req.map == true)
 		return false;
@@ -674,6 +689,7 @@ bool Mapper::setMode(ethzasl_icp_mapper::SetMode::Request &req, ethzasl_icp_mapp
 
 bool Mapper::getMode(ethzasl_icp_mapper::GetMode::Request &req, ethzasl_icp_mapper::GetMode::Response &res)
 {
+	ROS_INFO_STREAM("getMode in mapper.cpp");
 	res.localize = localizing;
 	res.map = mapping;
 	return true;
@@ -683,6 +699,7 @@ bool Mapper::getMode(ethzasl_icp_mapper::GetMode::Request &req, ethzasl_icp_mapp
 
 bool Mapper::getBoundedMap(ethzasl_icp_mapper::GetBoundedMap::Request &req, ethzasl_icp_mapper::GetBoundedMap::Response &res)
 {
+	ROS_INFO_STREAM("getBoundedMap in mapper.cpp");
 	if (!mapPointCloud)
 		return false;
 
@@ -747,6 +764,7 @@ bool Mapper::getBoundedMap(ethzasl_icp_mapper::GetBoundedMap::Request &req, ethz
 // Main function supporting the Mapper class
 int main(int argc, char **argv)
 {
+	ROS_INFO_STREAM("Entering main in mapper.cpp");
 	ros::init(argc, argv, "mapper");
 	ros::NodeHandle n;
 	ros::NodeHandle pn("~");

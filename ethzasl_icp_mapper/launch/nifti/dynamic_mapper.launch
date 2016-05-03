@@ -14,5 +14,14 @@
 		<param name="minMapPointCount" value="1000" /> 
 		<param name="localizing" value="true" /> 
 		<param name="mapping" value="true" /> 
+		<param name="vtkFinalMapName" value="/media/psf/Home/Documents/DOKUMENTI/Sola/ETH/Semester_project/finalMap.vtk" /> 
+		<param name="staticThreshold" value="0.6" /> 
+		<param name="dynamicThreshold" value="0.7" /> 
+		<param name="height" value="0" /> 
+		<param name="eps_d" value="0.1" /> 
+		<param name="maxAngle" value="0.01" /> 
+		<param name="eps" value="0.01" />
+		<param name="priorStatic" value="0.5" />
+		<param name="priorDyn" value="0.5" />
 	</node>
 </launch>
