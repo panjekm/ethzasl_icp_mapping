@@ -58,6 +58,7 @@ class Mapper
 	ros::Publisher mapPub;
 	ros::Publisher staticMapPub;
 	ros::Publisher dynamicMapPub;
+	ros::Publisher stepChangePub;
 	ros::Publisher outlierPub;
 	ros::Publisher odomPub;
 	ros::Publisher odomErrorPub;
@@ -305,6 +306,7 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	mapPub = n.advertise<sensor_msgs::PointCloud2>("point_map", 2, true);
 	staticMapPub = n.advertise<sensor_msgs::PointCloud2>("static_map_cutoff", 2, true);
 	dynamicMapPub = n.advertise<sensor_msgs::PointCloud2>("dynamic_map_cutoff", 2, true);
+	stepChangePub = n.advertise<sensor_msgs::PointCloud2>("step_change_pub", 2, true);
 	outlierPub = n.advertise<sensor_msgs::PointCloud2>("outliers", 2, true);
 	odomPub = n.advertise<nav_msgs::Odometry>("icp_odom", 50, true);
 	odomErrorPub = n.advertise<nav_msgs::Odometry>("icp_error_odom", 50, true);
@@ -751,7 +753,8 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 		return newPointCloud;
 	}
 
-	
+
+	DP stepChange = mapPointCloud->createSimilarEmpty();
 	
 	const int readPtsCount(newPointCloud->features.cols());
 	const int mapPtsCount(mapPointCloud->features.cols());
@@ -857,7 +860,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 	DP::View viewOn_nsec_map = mapPointCloud->getDescriptorViewByName("stamps_nsec");
 	
 
-	int loopCount = 0;
+	int updateCount = 0;
 
 	for(int i=0; i < mapCutPtsCount; i++)
 	{
@@ -932,7 +935,6 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 			// We don't update point behind the reading
 			if((readPt.norm() + eps_d + d_max) >= mapPt.norm()) 
 			{
-				loopCount++;
 				const float lastDyn = viewOnProbabilityDynamic(0,mapId);
 				const float lastStatic = viewOnProbabilityStatic(0, mapId);
 
@@ -993,10 +995,14 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 				if (delta < (eps_d + d_max)) {
 					viewOnProbabilityStatic(0,mapId) = lastStatic + distWeight * angleWeight * sigmoid_der * 0.3;
 					viewOnDynamicStatic(0,mapId) = 1;
+
+					stepChange.setColFrom(updateCount++, *mapPointCloud, mapId);
 				}
 				else {
 					viewOnProbabilityStatic(0,mapId) = lastStatic - angleWeight * normalWeight * sigmoid_der * 0.1;
 					viewOnDynamicStatic(0,mapId) = -1;
+
+					stepChange.setColFrom(updateCount++, *mapPointCloud, mapId);
 				}
 
 				if (viewOnProbabilityStatic(0,mapId) > 0.99) viewOnProbabilityStatic(0,mapId) = 0.99;
@@ -1015,7 +1021,13 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 
 		}
 	}
-	cout << "num of all points: " << mapCutPtsCount << ", num of probability updated points: " << loopCount <<endl << endl << endl;
+
+	stepChange.conservativeResize(updateCount);
+	stepChangePub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(stepChange, mapFrame, mapCreationTime));
+	// if (&stepChange) 
+		// delete &stepChange;
+
+	cout << "num of all points in mapCutPt: " << mapCutPtsCount << ", num of probability updated points: " << updateCount <<endl << endl << endl;
 
 
 
