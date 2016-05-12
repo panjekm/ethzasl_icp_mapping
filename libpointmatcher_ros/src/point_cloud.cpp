@@ -117,7 +117,7 @@ namespace PointMatcher_ros
 			}
 			else if (it->name == "stamps")
 			{
-				ROS_INFO("!!!!!!!!!!!! GOT MSG WITH STAMPS FIELD !!!!!!!!!!!!!!!!");
+				// ROS_INFO("!!!!!!!!!!!! GOT MSG WITH STAMPS FIELD !!!!!!!!!!!!!!!!");
 
 				TimeView timeView(cloud.getTimeViewByName("stamps"));
 
@@ -162,12 +162,13 @@ namespace PointMatcher_ros
 								case PF::UINT32:
 								timeView(dim, ptId) = boost::uint64_t(*reinterpret_cast<const uint32_t*>(fPtr));
 								fPtr += 4;
-								ROS_INFO("!!!!!!!!!!!! CASE UINT32 !!!!!!!!!!!!!!!!");
+								// ROS_INFO("!!!!!!!!!!!! CASE UINT32 !!!!!!!!!!!!!!!!");
+								// ROS_INFO_STREAM("timeView in ROS-PM conversion: " << timeView(dim,ptId));
 								break;
 								case PF::FLOAT32:
 								timeView(dim, ptId) = boost::uint64_t(*reinterpret_cast<const float*>(fPtr));
 								fPtr += 4;
-                   				ROS_INFO("!!!!!!!!!!!! CASE FLOAT32 !!!!!!!!!!!!!!!!");
+                   				// ROS_INFO("!!!!!!!!!!!! CASE FLOAT32 !!!!!!!!!!!!!!!!");
 								break;
 								case PF::FLOAT64:
 								timeView(dim, ptId) = boost::uint64_t(*reinterpret_cast<const double*>(fPtr));
@@ -176,6 +177,7 @@ namespace PointMatcher_ros
 								break;
 								default: abort();
 							}
+
 						}
 						dataPtr += rosMsg.point_step;
 						ptId += 1;
@@ -557,7 +559,7 @@ namespace PointMatcher_ros
 				rosCloud.fields.push_back(pointField);
 				offset += 4;
 				hasTime = true;
-				ROS_INFO("!!!!!!!!!!!! OUTPUTING MSG WITH STAMPS FIELD !!!!!!!!!!!!!!!!");
+				// ROS_INFO("!!!!!!!!!!!! OUTPUTING MSG WITH STAMPS FIELD !!!!!!!!!!!!!!!!");
 			}
 		}
 		
@@ -575,7 +577,7 @@ namespace PointMatcher_ros
 		rosCloud.row_step = rosCloud.point_step * rosCloud.width;
 		rosCloud.is_dense = true;
 		rosCloud.data.resize(rosCloud.row_step * rosCloud.height);
-		const unsigned featureDim(pmCloud.features.rows()-1);
+		const unsigned featureDim(pmCloud.features.rows());
 		const unsigned descriptorDim(pmCloud.descriptors.rows());
 		const unsigned timeDim(pmCloud.times.rows());
 		assert(descriptorDim == inDescriptorPos);
@@ -623,7 +625,8 @@ namespace PointMatcher_ros
 				//memcpy(fPtr, reinterpret_cast<const uint32_t*>(&pmCloud.times(0, pt)), 4 * timeDim);
 				// PointCloud2 can not contain uint64_t variables
 				// uint32_t are used for publishing, pmCloud.times(0, pt)/1000 (time in micro seconds)
-				uint32_t temp = pmCloud.times(0, pt)/1000;
+				uint32_t temp = pmCloud.times(0, pt);
+				// ROS_INFO_STREAM("Value of time to be converted to pc2: " << temp);
 				memcpy(fPtr, reinterpret_cast<const uint8_t*>(&temp), 4 * timeDim);
 			}
 		}
