@@ -297,7 +297,7 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	{
 		ROS_INFO_STREAM("No map post-filters config file given, not using these filters");
 	}
-
+	ROS_INFO_STREAM("MARKO: I START");
 	// topics and services initialization
 	if (getParam<bool>("subscribe_scan", true))
 		scanSub = n.subscribe("scan", inputQueueSize, &Mapper::gotScan, this);
@@ -560,7 +560,8 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 		// check if news points should be added to the map
 		if (
 			mapping &&
-			((estimatedOverlap < maxOverlapToMerge) || (icp.getInternalMap().features.cols() < minMapPointCount)) &&
+			(true) &&
+			// (estimatedOverlap < maxOverlapToMerge) || (icp.getInternalMap().features.cols() < minMapPointCount)
 			#if BOOST_VERSION >= 104100
 			(!mapBuildingInProgress)
 			#else // BOOST_VERSION >= 104100
@@ -629,8 +630,10 @@ void Mapper::setMap(DP* newPointCloud)
 	cerr << "publishing map" << endl;
 	// Publish map point cloud
 	// FIXME this crash when used without descriptor
-	if (mapPub.getNumSubscribers())
-		mapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*mapPointCloud, mapFrame, mapCreationTime));
+	if (mapPub.getNumSubscribers()) {
+		sensor_msgs::PointCloud2 mapPointCloud_PC2 = PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*mapPointCloud, mapFrame, mapCreationTime);
+		mapPub.publish(mapPointCloud_PC2);
+	}
 	
 
 	publishStaticMap(mapPointCloud);
@@ -1013,7 +1016,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 				
 
 				// Refresh time
-				viewOn_Msec_map(0,mapId) = viewOn_Msec_overlap(0,readId);	
+				viewOn_Msec_map(0,mapId) = viewOn_Msec_overlap(0,readId);
 				viewOn_sec_map(0,mapId) = viewOn_sec_overlap(0,readId);	
 				viewOn_nsec_map(0,mapId) = viewOn_nsec_overlap(0,readId);	
 			}
