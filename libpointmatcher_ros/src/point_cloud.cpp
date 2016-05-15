@@ -577,7 +577,7 @@ namespace PointMatcher_ros
 		rosCloud.row_step = rosCloud.point_step * rosCloud.width;
 		rosCloud.is_dense = true;
 		rosCloud.data.resize(rosCloud.row_step * rosCloud.height);
-		const unsigned featureDim(pmCloud.features.rows());
+		const unsigned featureDim(pmCloud.features.rows()-1);
 		const unsigned descriptorDim(pmCloud.descriptors.rows());
 		const unsigned timeDim(pmCloud.times.rows());
 		assert(descriptorDim == inDescriptorPos);
@@ -618,6 +618,7 @@ namespace PointMatcher_ros
 				else
 				{
 					memcpy(fPtr, reinterpret_cast<const uint8_t*>(&pmCloud.descriptors(0, pt)), scalarSize * descriptorDim);
+					fPtr += scalarSize * descriptorDim;
 				}
 			}
 			if (hasTime) {
