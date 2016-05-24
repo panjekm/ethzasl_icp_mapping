@@ -1,7 +1,7 @@
 - SimpleSensorNoiseDataPointsFilter
 - SamplingSurfaceNormalDataPointsFilter:
     knn: 20
-    ratio: 0.6
+    ratio: 1
     keepNormals: 1
     keepDensities: 1
 - MaxDensityDataPointsFilter:

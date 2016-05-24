@@ -158,6 +158,7 @@ protected:
 	DP removeCeiling(DP* pointCloud);
 	DP* updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting);
 	void waitForMapBuildingCompleted();
+	void getIntermediateTransforms(DP* pointCloud, const ros::Time& stamp);
 	
 	void publishLoop(double publishPeriod);
 	void publishTransform();
@@ -394,7 +395,6 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 
 
 	
-	
 	// Convert point cloud
 	const size_t goodCount(newPointCloud->features.cols());
 	if (goodCount == 0)
@@ -422,6 +422,7 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 		cout << "Adding time" << endl;
 		
 	}
+
 
 	ROS_INFO("Processing new point cloud");
 	{
@@ -479,6 +480,8 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 		ROS_ERROR_STREAM("Not enough points in newPointCloud: only " << ptsCount << " pts.");
 		return;
 	}
+
+
 
 	// Initialize the map if empty
  	if(!icp.hasMap())
@@ -720,6 +723,8 @@ Mapper::DP Mapper::removeCeiling(DP* pointCloud)
 
 Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting)
 {
+	getIntermediateTransforms(newPointCloud, ros::Time::now());
+
 	timer t;
 
 	// FIXME: those are parameters
@@ -1123,6 +1128,30 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 	
 	return newPointCloud;
 }
+
+
+void Mapper::getIntermediateTransforms(DP* pointCloud, const ros::Time& stamp)
+{
+	ROS_INFO_STREAM("!!!!! Im in IntermediateTransforms function !!!!!");
+	DP::TimeView view_on_time = pointCloud->getTimeViewByName("stamps");
+	
+	std::vector<int> v;
+	for(int i = 0; i < pointCloud->features.cols(); i++)
+	{
+		v.push_back(view_on_time(0,i));
+	}
+    std::sort(v.begin(), v.end());
+    auto last = std::unique(v.begin(), v.end());
+    v.erase(last, v.end()); 
+
+    ROS_INFO_STREAM("Elements in list: ");
+    for(int i = 0; i < v.size(); i++) 
+    {
+    	std::cout << v[i] << " ";
+    }
+    
+}
+
 
 void Mapper::waitForMapBuildingCompleted()
 {
