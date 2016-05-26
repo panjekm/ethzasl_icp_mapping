@@ -1149,6 +1149,23 @@ void Mapper::getIntermediateTransforms(DP* pointCloud, const ros::Time& stamp)
     {
     	std::cout << v[i] << " ";
     }
+
+
+    tf::StampedTransform current_transform;
+    ROS_INFO_STREAM("CHECK TIME: " << v[1] / 1000.0);
+    ros::Time sweep_stamp = publishStamp + ros::Duration(v[1] / 1000.0);
+    ros::Time scan_stamp = publishStamp;
+
+    if(tfListener.waitForTransform("/odom", sweep_stamp,
+    	"/odom", scan_stamp,
+    	"/map", ros::Duration(5.0)))
+    {
+    	ROS_INFO_STREAM("!!!!!!!!!!!!!!!!!!!!! Found transform odom to odom !!!!!!!");
+    	tfListener.lookupTransform("/odom", sweep_stamp,
+    		"/odom", scan_stamp,
+    		"/map", current_transform);
+    	// ROS_INFO_STREAM("Current transform: " << current_transform);
+    }
     
 }
 
