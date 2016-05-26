@@ -360,6 +360,7 @@ void Mapper::gotCloud(const sensor_msgs::PointCloud2& cloudMsgIn)
 {
 	if(localizing)
 	{
+		publishStamp = cloudMsgIn.header.stamp;
 		unique_ptr<DP> cloud(new DP(PointMatcher_ros::rosMsgToPointMatcherCloud<float>(cloudMsgIn)));
 		processCloud(move(cloud), cloudMsgIn.header.frame_id, cloudMsgIn.header.stamp, cloudMsgIn.header.seq);
 	}
@@ -536,7 +537,6 @@ void Mapper::processCloud(unique_ptr<DP> newPointCloud, const std::string& scann
 		}
 		
 		// Compute tf
-		publishStamp = stamp;
 		publishLock.lock();
 		TOdomToMap = Ticp * TOdomToScanner;
 		// Publish tf
@@ -1151,11 +1151,13 @@ void Mapper::getIntermediateTransforms(DP* pointCloud, const ros::Time& stamp)
     }
 
 
-    ros::Time sweep_stamp = publishStamp + ros::Duration(v[70] / 1000.0);
-    ros::Time scan_stamp = publishStamp;
+    ros::Time scan_stamp = publishStamp + ros::Duration(v[70] / 1000.0);
+    ros::Time sweep_stamp = publishStamp;
 
-    PM::TransformationParameters current_transform = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/odom", scan_stamp, "/odom", scan_stamp, "/map");
-    ROS_INFO_STREAM("Current transform: " << current_transform);
+    PM::TransformationParameters tf_map2baselink = PointMatcher_ros::transformListenerToEigenMatrix<float>(tfListener, "/map", "/base_link", scan_stamp);
+    PM::TransformationParameters tf_baselink2baselink_in_time = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/base_link", sweep_stamp, "/base_link", scan_stamp, "/map");
+    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
+    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
 
 }
 
