@@ -33,6 +33,26 @@ namespace PointMatcher_ros
 	template
 	PointMatcher<double>::TransformationParameters transformListenerToEigenMatrix<double>(const tf::TransformListener &listener, const std::string& target, const std::string& source, const ros::Time& stamp);
 
+
+	template<typename T>
+	typename PointMatcher<T>::TransformationParameters transformStampedTransformToTransformationParameters(const tf::TransformListener &listener, const std::string& target, ros::Time target_time, const std::string& source, const ros::Time source_time, const std::string& reference)
+	{
+		typedef typename PointMatcher<T>::TransformationParameters TransformationParameters;
+		
+		tf::StampedTransform stampedTr;
+		listener.waitForTransform(target, target_time, source, source_time, reference, ros::Duration(5.0));
+		listener.lookupTransform(target, target_time, source, source_time, reference, stampedTr);
+						
+		Eigen::Affine3d eigenTr;
+		tf::transformTFToEigen(stampedTr, eigenTr);
+		return eigenTr.matrix().cast<T>();
+	}
+	
+	template
+	PointMatcher<float>::TransformationParameters transformStampedTransformToTransformationParameters<float>(const tf::TransformListener &listener, const std::string& target, ros::Time target_time, const std::string& source, const ros::Time source_time, const std::string& reference);
+	template
+	PointMatcher<double>::TransformationParameters transformStampedTransformToTransformationParameters<double>(const tf::TransformListener &listener, const std::string& target, ros::Time target_time, const std::string& source, const ros::Time source_time, const std::string& reference);
+
 	
 	template<typename T>
 	typename PointMatcher<T>::TransformationParameters odomMsgToEigenMatrix(const nav_msgs::Odometry& odom)
@@ -130,6 +150,7 @@ namespace PointMatcher_ros
 		M out(M::Identity(dimp1,dimp1));
 		out.topLeftCorner(2,2) = matrix.topLeftCorner(2,2);
 		out.topRightCorner(2,1) = matrix.topRightCorner(2,1);
+		ROS_INFO_STREAM("DIMENSION MISMATCH!!!!!!!!!!!!!!!!!!!!!!!!");
 		return out;
 	}
 	

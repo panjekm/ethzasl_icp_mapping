@@ -24,6 +24,9 @@ namespace PointMatcher_ros
 	typename PointMatcher<T>::TransformationParameters transformListenerToEigenMatrix(const tf::TransformListener &listener, const std::string& target, const std::string& source, const ros::Time& stamp);
 	
 	template<typename T>
+	typename PointMatcher<T>::TransformationParameters transformStampedTransformToTransformationParameters(const tf::TransformListener &listener, const std::string& target, ros::Time target_time, const std::string& source, const ros::Time source_time, const std::string& reference);
+
+	template<typename T>
 	typename PointMatcher<T>::TransformationParameters odomMsgToEigenMatrix(const nav_msgs::Odometry& odom);
 	
 	// to tf/ROS
