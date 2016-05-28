@@ -134,6 +134,8 @@ class Mapper
 	
 
 	PM::TransformationParameters TOdomToMap;
+	PM::TransformationParameters tf_map2baselink;
+	PM::TransformationParameters tf_baselink2baselink_in_time;
 	boost::thread publishThread;
 	boost::mutex publishLock;
 	ros::Time publishStamp;
@@ -158,7 +160,8 @@ protected:
 	DP removeCeiling(DP* pointCloud);
 	DP* updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting);
 	void waitForMapBuildingCompleted();
-	void getIntermediateTransforms(DP* pointCloud, const ros::Time& stamp);
+	std::vector<int> getTimestamps(DP* pointCloud);
+	void getIntermediateTransforms(DP* pointCloud, int time_shift);
 	
 	void publishLoop(double publishPeriod);
 	void publishTransform();
@@ -210,6 +213,8 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	maxDyn(getParam<double>("maxDyn", 0.95)),
 	maxDistNewPoint(pow(getParam<double>("maxDistNewPoint", 0.1),2)),
 	TOdomToMap(PM::TransformationParameters::Identity(4, 4)),
+	tf_map2baselink(PM::TransformationParameters::Identity(4, 4)),
+	tf_baselink2baselink_in_time(PM::TransformationParameters::Identity(4, 4)),
 	publishStamp(ros::Time::now()),
   tfListener(ros::Duration(30)),
   	eps(getParam<float>("eps", 0.0001))
@@ -723,7 +728,22 @@ Mapper::DP Mapper::removeCeiling(DP* pointCloud)
 
 Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting)
 {
-	getIntermediateTransforms(newPointCloud, ros::Time::now());
+	// getIntermediateTransforms(newPointCloud, ros::Time::now());
+
+	std::vector<int> times = Mapper::getTimestamps(newPointCloud);
+	ROS_INFO_STREAM("Timestamps elements received in mapper: ");
+    for(int i = 0; i < times.size(); i++) 
+    {
+    	std::cout << times[i] << " ";
+    }
+
+    // TESTING IF TF RETRIEVAL PIPELINE WORKS
+    getIntermediateTransforms(newPointCloud, times[80]);
+    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
+    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
+    getIntermediateTransforms(newPointCloud, times[100]);
+    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
+    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
 
 	timer t;
 
@@ -1130,9 +1150,9 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 }
 
 
-void Mapper::getIntermediateTransforms(DP* pointCloud, const ros::Time& stamp)
+std::vector<int> Mapper::getTimestamps(DP* pointCloud) 
 {
-	ROS_INFO_STREAM("!!!!! Im in IntermediateTransforms function !!!!!");
+	ROS_INFO_STREAM("!!!!! Im in getTimeStamps function !!!!!");
 	DP::TimeView view_on_time = pointCloud->getTimeViewByName("stamps");
 	
 	std::vector<int> v;
@@ -1144,21 +1164,17 @@ void Mapper::getIntermediateTransforms(DP* pointCloud, const ros::Time& stamp)
     auto last = std::unique(v.begin(), v.end());
     v.erase(last, v.end()); 
 
-    ROS_INFO_STREAM("Elements in list: ");
-    for(int i = 0; i < v.size(); i++) 
-    {
-    	std::cout << v[i] << " ";
-    }
+    return v;
+}
 
 
-    ros::Time scan_stamp = publishStamp + ros::Duration(v[70] / 1000.0);
+void Mapper::getIntermediateTransforms(DP* pointCloud, int time_shift)
+{
+    ros::Time scan_stamp = publishStamp + ros::Duration(time_shift / 1000.0);
     ros::Time sweep_stamp = publishStamp;
 
-    PM::TransformationParameters tf_map2baselink = PointMatcher_ros::transformListenerToEigenMatrix<float>(tfListener, "/map", "/base_link", scan_stamp);
-    PM::TransformationParameters tf_baselink2baselink_in_time = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/base_link", sweep_stamp, "/base_link", scan_stamp, "/map");
-    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
-    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
-
+    tf_map2baselink = PointMatcher_ros::transformListenerToEigenMatrix<float>(tfListener, "/map", "/base_link", scan_stamp);
+    tf_baselink2baselink_in_time = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/base_link", sweep_stamp, "/base_link", scan_stamp, "/map");
 }
 
 
