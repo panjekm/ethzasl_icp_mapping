@@ -62,6 +62,9 @@ class Mapper
 	ros::Publisher outlierPub;
 	ros::Publisher odomPub;
 	ros::Publisher odomErrorPub;
+
+	ros::Publisher test1MapPub;
+	ros::Publisher test2MapPub;
 	
 	// Services
 	ros::ServiceServer getPointMapSrv;
@@ -324,6 +327,9 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	setModeSrv = pn.advertiseService("set_mode", &Mapper::setMode, this);
 	getModeSrv = pn.advertiseService("get_mode", &Mapper::getMode, this);
 	getBoundedMapSrv = pn.advertiseService("get_bounded_map", &Mapper::getBoundedMap, this);
+
+	test1MapPub = n.advertise<sensor_msgs::PointCloud2>("test1", 2, true);
+	test2MapPub = n.advertise<sensor_msgs::PointCloud2>("test2", 2, true);
 
 	// refreshing tf transform thread
 	publishThread = boost::thread(boost::bind(&Mapper::publishLoop, this, tfRefreshPeriod));
@@ -728,23 +734,6 @@ Mapper::DP Mapper::removeCeiling(DP* pointCloud)
 
 Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParameters Ticp, bool updateExisting)
 {
-	// getIntermediateTransforms(newPointCloud, ros::Time::now());
-
-	std::vector<int> times = Mapper::getTimestamps(newPointCloud);
-	ROS_INFO_STREAM("Timestamps elements received in mapper: ");
-    for(int i = 0; i < times.size(); i++) 
-    {
-    	std::cout << times[i] << " ";
-    }
-
-    // TESTING IF TF RETRIEVAL PIPELINE WORKS
-    getIntermediateTransforms(newPointCloud, times[80]);
-    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
-    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
-    getIntermediateTransforms(newPointCloud, times[100]);
-    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
-    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
-
 	timer t;
 
 	// FIXME: those are parameters
@@ -780,6 +769,31 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 		mapPostFilters.apply(*newPointCloud);
 		return newPointCloud;
 	}
+
+	// !!!!!!!!!!!!!!!!!!!!!   TESTING IF TF RETRIEVAL PIPELINE WORKS
+	std::vector<int> times = Mapper::getTimestamps(newPointCloud);
+	ROS_INFO_STREAM("Timestamps elements received in mapper: ");
+    for(int i = 0; i < times.size(); i++) 
+    {
+    	std::cout << times[i] << " ";
+    }
+    
+	    getIntermediateTransforms(newPointCloud, times[80]);
+	    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
+	    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
+	    getIntermediateTransforms(newPointCloud, times[100]);
+	    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
+	    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
+
+	    DP test1 = transformation->compute(*mapPointCloud, tf_map2baselink.inverse());
+	    DP test2 = transformation->compute(*newPointCloud, tf_baselink2baselink_in_time);
+	    
+
+
+	    test1MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test1, mapFrame, mapCreationTime));
+	    test2MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test2, mapFrame, mapCreationTime));
+	
+    // !!!!!!!!!!!!!!!!!!!!!    END OF TESTING
 
 
 	DP stepChange = mapPointCloud->createSimilarEmpty();
