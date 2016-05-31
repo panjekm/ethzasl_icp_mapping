@@ -778,21 +778,32 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
     	std::cout << times[i] << " ";
     }
     
-	    getIntermediateTransforms(newPointCloud, times[80]);
-	    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
-	    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
-	    getIntermediateTransforms(newPointCloud, times[100]);
-	    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
-	    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
-
-	    DP test1 = transformation->compute(*mapPointCloud, tf_map2baselink);
-	    DP test2 = transformation->compute(*newPointCloud, tf_baselink2baselink_in_time);
-	    
+    getIntermediateTransforms(newPointCloud, times[100]);
+    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
+    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
 
 
-	    test1MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test1, mapFrame, mapCreationTime));
-	    test2MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test2, mapFrame, mapCreationTime));
-	
+	int newPointCloud_pts_count = newPointCloud->features.cols();
+	int newPointCloud_scan_pts_count = 0;
+	DP newPointCloud_scancut = newPointCloud->createSimilarEmpty();
+	DP::TimeView newPointCloud_view_on_time = newPointCloud->getTimeViewByName("stamps");
+	for (int i = 0; i < newPointCloud_pts_count; i++)
+	{
+		if (newPointCloud_view_on_time(0,i) == times[100])
+		{
+			newPointCloud_scancut.setColFrom(newPointCloud_scan_pts_count, *newPointCloud, i);
+			newPointCloud_scan_pts_count++;
+		}
+	}
+	newPointCloud_scancut.conservativeResize(newPointCloud_scan_pts_count);
+
+
+    DP test1 = transformation->compute(*mapPointCloud, tf_map2baselink);
+    DP test2 = transformation->compute(newPointCloud_scancut, tf_baselink2baselink_in_time);
+
+    test1MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test1, mapFrame, mapCreationTime));
+    test2MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test2, mapFrame, mapCreationTime));
+
     // !!!!!!!!!!!!!!!!!!!!!    END OF TESTING
 
 
