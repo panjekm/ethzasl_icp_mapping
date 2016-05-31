@@ -786,7 +786,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 	    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
 
 	    DP test1 = transformation->compute(*mapPointCloud, tf_map2baselink);
-	    DP test2 = transformation->compute(*newPointCloud, tf_baselink2baselink_in_time.inverse());
+	    DP test2 = transformation->compute(*newPointCloud, tf_baselink2baselink_in_time);
 	    
 
 
@@ -1188,7 +1188,7 @@ void Mapper::getIntermediateTransforms(DP* pointCloud, int time_shift)
     ros::Time sweep_stamp = publishStamp;
 
     tf_map2baselink = PointMatcher_ros::transformListenerToEigenMatrix<float>(tfListener, "/base_link", "/map", scan_stamp);
-    tf_baselink2baselink_in_time = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/base_link", sweep_stamp, "/base_link", scan_stamp, "/map");
+    tf_baselink2baselink_in_time = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/base_link", scan_stamp, "/base_link", sweep_stamp, "/map");
 }
 
 
