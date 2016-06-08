@@ -137,8 +137,9 @@ class Mapper
 	
 
 	PM::TransformationParameters TOdomToMap;
-	PM::TransformationParameters tf_map2baselink;
-	PM::TransformationParameters tf_baselink2baselink_in_time;
+	PM::TransformationParameters T_mapScan_to_baselinkScan;
+	PM::TransformationParameters T_baselinkSweep_to_baselinkScan;
+	PM::TransformationParameters T_baselinkScan_to_laserScan;
 	boost::thread publishThread;
 	boost::mutex publishLock;
 	ros::Time publishStamp;
@@ -216,12 +217,19 @@ Mapper::Mapper(ros::NodeHandle& n, ros::NodeHandle& pn):
 	maxDyn(getParam<double>("maxDyn", 0.95)),
 	maxDistNewPoint(pow(getParam<double>("maxDistNewPoint", 0.1),2)),
 	TOdomToMap(PM::TransformationParameters::Identity(4, 4)),
-	tf_map2baselink(PM::TransformationParameters::Identity(4, 4)),
-	tf_baselink2baselink_in_time(PM::TransformationParameters::Identity(4, 4)),
+	T_mapScan_to_baselinkScan(PM::TransformationParameters::Identity(4, 4)),
+	T_baselinkSweep_to_baselinkScan(PM::TransformationParameters::Identity(4, 4)),
 	publishStamp(ros::Time::now()),
-  tfListener(ros::Duration(30)),
-  	eps(getParam<float>("eps", 0.0001))
+  	tfListener(ros::Duration(30)),
+  	eps(getParam<float>("eps", 0.0001)),
+  	T_baselinkScan_to_laserScan(PM::TransformationParameters::Identity(4, 4))
+
 {
+	//initialize laser to base_link translation
+	T_baselinkScan_to_laserScan(0,3) = -0.2502;
+	T_baselinkScan_to_laserScan(1,3) = 0;
+	T_baselinkScan_to_laserScan(2,3) = -0.1407;
+
 
 	// Ensure proper states
 	if(localizing == false)
@@ -778,54 +786,66 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
     	std::cout << times[i] << " ";
     }
     
-    getIntermediateTransforms(newPointCloud, times[100]);
-    ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
-    ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
+    for(int j = 0; j < (times.size() - 4); j = j + 5)
+    {
+    	getIntermediateTransforms(newPointCloud, times[j+2]);
+    	// ROS_INFO_STREAM("tf_map2baselink: \n" << tf_map2baselink);
+    	// ROS_INFO_STREAM("tf_baselink2baselink_in_time: \n" << tf_baselink2baselink_in_time);
 
 
-	int newPointCloud_pts_count = newPointCloud->features.cols();
-	int newPointCloud_scan_pts_count = 0;
-	DP newPointCloud_scancut = newPointCloud->createSimilarEmpty();
-	DP::TimeView newPointCloud_view_on_time = newPointCloud->getTimeViewByName("stamps");
-	for (int i = 0; i < newPointCloud_pts_count; i++)
-	{
-		if (newPointCloud_view_on_time(0,i) == times[100])
-		{
-			newPointCloud_scancut.setColFrom(newPointCloud_scan_pts_count, *newPointCloud, i);
-			newPointCloud_scan_pts_count++;
-		}
-	}
-	newPointCloud_scancut.conservativeResize(newPointCloud_scan_pts_count);
+    	int newPointCloud_pts_count = newPointCloud->features.cols();
+    	int newPointCloud_scan_pts_count = 0;
+    	DP newPointCloud_scancut = newPointCloud->createSimilarEmpty();
+    	DP::TimeView newPointCloud_view_on_time = newPointCloud->getTimeViewByName("stamps");
+    	for (int i = 0; i < newPointCloud_pts_count; i++)
+    	{
+    		if (newPointCloud_view_on_time(0,i) == times[j] || newPointCloud_view_on_time(0,i) == times[j+1] || newPointCloud_view_on_time(0,i) == times[j+2]
+    			|| newPointCloud_view_on_time(0,i) == times[j+3] || newPointCloud_view_on_time(0,i) == times[j+4])
+    		{
+    			newPointCloud_scancut.setColFrom(newPointCloud_scan_pts_count, *newPointCloud, i);
+    			newPointCloud_scan_pts_count++;
+    		}
+    	}
+    	newPointCloud_scancut.conservativeResize(newPointCloud_scan_pts_count);
+
+    	// DP mapPointCloud_local = transformation->compute(*mapPointCloud, T_baselinkScan_to_laserScan * T_mapScan_to_baselinkScan);
+    	// DP newPointCloud_local = transformation->compute(*newPointCloud, T_baselinkScan_to_laserScan * T_baselinkSweep_to_baselinkScan);
+
+    	// TIMESTAMPS version
+    	DP mapPointCloud_local = transformation->compute(*mapPointCloud, T_baselinkScan_to_laserScan * T_mapScan_to_baselinkScan);
+    	DP newPointCloud_local = transformation->compute(newPointCloud_scancut, T_baselinkScan_to_laserScan * T_baselinkSweep_to_baselinkScan);
+
+    	// if (times[j+2] > 910 && times[j+2] < 1000) {
+	    // 	mapPointCloud_local.save("/media/psf/Home/Documents/DOKUMENTI/Sola/ETH/Semester_project/mapPointCloud_local.vtk");
+	    // 	newPointCloud_local.save("/media/psf/Home/Documents/DOKUMENTI/Sola/ETH/Semester_project/newPointCloud_local.vtk");
+	    // }
 
 
-    DP test1 = transformation->compute(*mapPointCloud, tf_map2baselink);
-    DP test2 = transformation->compute(newPointCloud_scancut, tf_baselink2baselink_in_time);
-
-    test1MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test1, mapFrame, mapCreationTime));
-    test2MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(test2, mapFrame, mapCreationTime));
+    	// test1MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(mapPointCloud_local, "/base_link", mapCreationTime));
+    	// test2MapPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(newPointCloud_local, "/base_link", mapCreationTime));
 
     // !!!!!!!!!!!!!!!!!!!!!    END OF TESTING
 
 
-	DP stepChange = mapPointCloud->createSimilarEmpty();
-	
-	const int readPtsCount(newPointCloud->features.cols());
-	const int mapPtsCount(mapPointCloud->features.cols());
-	
+    	DP stepChange = mapPointCloud->createSimilarEmpty();
+
+    	const int readPtsCount(newPointCloud_local.features.cols());
+    	const int mapPtsCount(mapPointCloud->features.cols());
+
 	// Build a range image of the reading point cloud (local coordinates)
-	PM::Matrix radius_reading = newPointCloud->features.topRows(3).colwise().norm();
+    	PM::Matrix radius_reading = newPointCloud_local.features.topRows(3).colwise().norm();
 
 	PM::Matrix angles_reading(2, readPtsCount); // 0=inclination, 1=azimuth
 
 	// No atan in Eigen, so we are for to loop through it...
 	for(int i=0; i<readPtsCount; i++)
 	{
-		const float ratio = newPointCloud->features(2,i)/radius_reading(0,i);
+		const float ratio = newPointCloud_local.features(2,i)/radius_reading(0,i);
 		//if(ratio < -1 || ratio > 1)
 			//cout << "Error angle!" << endl;
 
 		angles_reading(0,i) = acos(ratio);
-		angles_reading(1,i) = atan2(newPointCloud->features(1,i), newPointCloud->features(0,i));
+		angles_reading(1,i) = atan2(newPointCloud_local.features(1,i), newPointCloud_local.features(0,i));
 	}
 
 	std::shared_ptr<NNS> featureNNS;
@@ -833,7 +853,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 
 
 	// Transform the global map in local coordinates
-	DP mapLocalFrame = transformation->compute(*mapPointCloud, Ticp.inverse());
+	// DP mapLocalFrame = transformation->compute(*mapPointCloud, Ticp.inverse());
 
 	// Remove points out of sensor range
 	// FIXME: this is a parameter
@@ -841,12 +861,12 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 	PM::Matrix globalId(1, mapPtsCount); 
 
 	int mapCutPtsCount = 0;
-	DP mapLocalFrameCut(mapLocalFrame.createSimilarEmpty());
+	DP mapLocalFrameCut(mapPointCloud_local.createSimilarEmpty());
 	for (int i = 0; i < mapPtsCount; i++)
 	{
-		if (mapLocalFrame.features.col(i).head(3).norm() < sensorMaxRange)
+		if (mapPointCloud_local.features.col(i).head(3).norm() < sensorMaxRange)
 		{
-			mapLocalFrameCut.setColFrom(mapCutPtsCount, mapLocalFrame, i);
+			mapLocalFrameCut.setColFrom(mapCutPtsCount, mapPointCloud_local, i);
 			globalId(0,mapCutPtsCount) = i;
 			mapCutPtsCount++;
 		}
@@ -923,7 +943,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 			const int mapId = globalId(0,i);
 			
 			// in local coordinates
-			const Eigen::Vector3f readPt = newPointCloud->features.col(readId).head(3);
+			const Eigen::Vector3f readPt = newPointCloud_local.features.col(readId).head(3);
 			const Eigen::Vector3f mapPt = mapLocalFrameCut.features.col(i).head(3);
 			const Eigen::Vector3f mapPt_n = mapPt.normalized();
 			const float delta = (readPt - mapPt).norm();
@@ -981,7 +1001,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 			// cout << "Probability association if: " << ((readPt.norm() + eps_d + d_max) >= mapPt.norm()) << endl;
 			// cout << "readPt.norm(): "<< readPt.norm()  << ", mapPt.norm(): "<< mapPt.norm() << ", w_p2: " << w_p2 << ", w_d2: " << w_d2 << endl;
 			// cout << "delta: " << delta << ", d_max: " << d_max << ", w_v: " << w_v << ", w_d1: " << w_d1 << ", offset: " << offset << endl;
-		
+
 
 
 			// PROBABILITY ASSOCIATION
@@ -1035,7 +1055,10 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 				float distWeight, angleWeight, normalWeight;
 
 				if (delta < (eps_d + d_max)) {
-					distWeight = eps + (1 - eps) * (1 - (delta / (eps_d + d_max)));
+					if(delta < eps_d) 
+						distWeight = 1;
+					else 
+						distWeight = eps + (1 - eps) * (1 - (delta / (eps_d + d_max)));
 				}
 
 				angleWeight = w_d1;
@@ -1049,7 +1072,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 					viewOnProbabilityStatic(0,mapId) = lastStatic + distWeight * angleWeight * sigmoid_der * 0.3;
 					viewOnDynamicStatic(0,mapId) = 1;
 
-					stepChange.setColFrom(updateCount++, *mapPointCloud, mapId);
+					stepChange.setColFrom(updateCount++, *mapPointCloud, mapId);	
 				}
 				else {
 					viewOnProbabilityStatic(0,mapId) = lastStatic - angleWeight * normalWeight * sigmoid_der * 0.1;
@@ -1076,13 +1099,13 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 	}
 
 	stepChange.conservativeResize(updateCount);
-	stepChangePub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(stepChange, mapFrame, mapCreationTime));
+	// stepChangePub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(stepChange, mapFrame, mapCreationTime));
 	// if (&stepChange) 
 		// delete &stepChange;
 
-	cout << "num of all points in mapCutPt: " << mapCutPtsCount << ", num of probability updated points: " << updateCount <<endl << endl << endl;
+	cout << "num of all points in mapCutPt: " << mapCutPtsCount << ", num of probability updated points: " << updateCount <<endl;
 
-
+}
 
 
 	// Correct new points using ICP result
@@ -1090,26 +1113,26 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 
 	// Generate temporary map for density computation
 	//DP tmp_map = (*mapPointCloud); // FIXME: this should be on mapLocalFrameCut
-	DP tmp_map = mapLocalFrameCut; // FIXME: this should be on mapLocalFrameCut
-	tmp_map.concatenate(*newPointCloud);
+	// DP tmp_map = mapLocalFrameCut; // FIXME: this should be on mapLocalFrameCut
+	// tmp_map.concatenate(*newPointCloud);
 
-	// Compute density
-	//std::shared_ptr<NNS> featureNNS;
+	// // Compute density
+	// //std::shared_ptr<NNS> featureNNS;
 
-	cout << "build first kdtree with " << tmp_map.features.cols() << endl;
-	// build and populate NNS
-	featureNNS.reset( NNS::create(tmp_map.features, tmp_map.features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
+	// cout << "build first kdtree with " << tmp_map.features.cols() << endl;
+	// // build and populate NNS
+	// featureNNS.reset( NNS::create(tmp_map.features, tmp_map.features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
 	
-	PM::Matches matches_overlap(
-		Matches::Dists(1, readPtsCount),
-		Matches::Ids(1, readPtsCount)
-	);
+	// PM::Matches matches_overlap(
+	// 	Matches::Dists(1, readPtsCount),
+	// 	Matches::Ids(1, readPtsCount)
+	// );
 	
-	featureNNS->knn(newPointCloud->features, matches_overlap.ids, matches_overlap.dists, 1, 0);
+	// featureNNS->knn(newPointCloud->features, matches_overlap.ids, matches_overlap.dists, 1, 0);
 	
 	
-	DP overlap(newPointCloud->createSimilarEmpty());
-	DP no_overlap(newPointCloud->createSimilarEmpty());
+	// DP overlap(newPointCloud->createSimilarEmpty());
+	// DP no_overlap(newPointCloud->createSimilarEmpty());
 	
 	
 
@@ -1118,40 +1141,40 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 	//const float maxDist = pow(0.1, 2); // ISER 2014
 	//const float maxDist = pow(0.1, 2);
 
-	int ptsOut = 0;
-	int ptsIn = 0;
-	for (int i = 0; i < readPtsCount; ++i)
-	{
-		if (matches_overlap.dists(i) > maxDistNewPoint)
-		{
-			no_overlap.setColFrom(ptsOut, *newPointCloud, i);
-			ptsOut++;
-		}
-		else
-		{
-			overlap.setColFrom(ptsIn, *newPointCloud, i);
-			ptsIn++;
-		}
-	}
+	// int ptsOut = 0;
+	// int ptsIn = 0;
+	// for (int i = 0; i < readPtsCount; ++i)
+	// {
+	// 	if (matches_overlap.dists(i) > maxDistNewPoint)
+	// 	{
+	// 		no_overlap.setColFrom(ptsOut, *newPointCloud, i);
+	// 		ptsOut++;
+	// 	}
+	// 	else
+	// 	{
+	// 		overlap.setColFrom(ptsIn, *newPointCloud, i);
+	// 		ptsIn++;
+	// 	}
+	// }
 
-	no_overlap.conservativeResize(ptsOut);
-	overlap.conservativeResize(ptsIn);
+	// no_overlap.conservativeResize(ptsOut);
+	// overlap.conservativeResize(ptsIn);
 
-	cout << "ptsOut=" << ptsOut << ", ptsIn=" << ptsIn << endl;
+	// cout << "ptsOut=" << ptsOut << ", ptsIn=" << ptsIn << endl;
 
-	// Publish outliers
-	//if (outlierPub.getNumSubscribers())
-	//{
-		//outlierPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(no_overlap, mapFrame, mapCreationTime));
-	//}
+	// // Publish outliers
+	// //if (outlierPub.getNumSubscribers())
+	// //{
+	// 	//outlierPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(no_overlap, mapFrame, mapCreationTime));
+	// //}
 
-	// Initialize descriptors
-	//no_overlap.addDescriptor("probabilityStatic", PM::Matrix::Zero(1, no_overlap.features.cols()));
-	no_overlap.addDescriptor("probabilityStatic", PM::Matrix::Constant(1, no_overlap.features.cols(), priorStatic));
-	//no_overlap.addDescriptor("probabilityDynamic", PM::Matrix::Zero(1, no_overlap.features.cols()));
-	no_overlap.addDescriptor("probabilityDynamic", PM::Matrix::Constant(1, no_overlap.features.cols(), priorDyn));
+	// // Initialize descriptors
+	// //no_overlap.addDescriptor("probabilityStatic", PM::Matrix::Zero(1, no_overlap.features.cols()));
+	// no_overlap.addDescriptor("probabilityStatic", PM::Matrix::Constant(1, no_overlap.features.cols(), priorStatic));
+	// //no_overlap.addDescriptor("probabilityDynamic", PM::Matrix::Zero(1, no_overlap.features.cols()));
+	// no_overlap.addDescriptor("probabilityDynamic", PM::Matrix::Constant(1, no_overlap.features.cols(), priorDyn));
 
-	no_overlap.addDescriptor("dynamic_static", PM::Matrix::Zero(1, no_overlap.features.cols()));
+	// no_overlap.addDescriptor("dynamic_static", PM::Matrix::Zero(1, no_overlap.features.cols()));
 
 	// shrink the newPointCloud to the new information
 	// *newPointCloud = no_overlap; //COMMENTED BY MARKO, NO SHRINKING OF MAPS
@@ -1198,8 +1221,10 @@ void Mapper::getIntermediateTransforms(DP* pointCloud, int time_shift)
     ros::Time scan_stamp = publishStamp + ros::Duration(time_shift / 1000.0);
     ros::Time sweep_stamp = publishStamp;
 
-    tf_map2baselink = PointMatcher_ros::transformListenerToEigenMatrix<float>(tfListener, "/base_link", "/map", scan_stamp);
-    tf_baselink2baselink_in_time = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/base_link", scan_stamp, "/base_link", sweep_stamp, "/map");
+    T_mapScan_to_baselinkScan = PointMatcher_ros::transformListenerToEigenMatrix<float>(tfListener, "/base_link", "/map", scan_stamp);
+    // T_mapScan_to_baselinkScan = PointMatcher_ros::transformListenerToEigenMatrix<float>(tfListener, "/base_link", "/laser", scan_stamp);
+    T_baselinkSweep_to_baselinkScan = PointMatcher_ros::transformStampedTransformToTransformationParameters<float>(tfListener, "/base_link", scan_stamp, "/base_link", sweep_stamp, "/map");
+    // ROS_INFO_STREAM("TF: laser to base_link: " << tf_map2baselink);
 }
 
 
