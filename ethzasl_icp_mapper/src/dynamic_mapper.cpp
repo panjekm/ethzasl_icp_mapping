@@ -963,8 +963,8 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 			// WEIGHT DEFINITIONS
 			// Weight for dynamic elements
 			const float w_v = eps + (1 - eps)*fabs(normal_map.dot(mapPt_n));
-			//const float w_d1 = 1 + eps - acos(readPt.normalized().dot(mapPt_n))/maxAngle;
-			const float w_d1 =  eps + (1 - eps)*(1 - sqrt(dists(i))/maxAngle); 
+			const float w_d1 = eps + (1 - eps) *(1 - acos((readPt.normalized()).dot(mapPt_n))/maxAngle);
+			// const float w_d1 =  eps + (1 - eps)*(1 - sqrt(dists(i))/maxAngle); 
 			
 			
 			const float offset = delta - eps_d;
@@ -1058,7 +1058,7 @@ Mapper::DP* Mapper::updateMap(DP* newPointCloud, const PM::TransformationParamet
 					if(delta < eps_d) 
 						distWeight = 1;
 					else 
-						distWeight = eps + (1 - eps) * (1 - (delta / (eps_d + d_max)));
+						distWeight = eps + (1 - eps) * (1 - ((delta - eps_d) / d_max));
 				}
 
 				angleWeight = w_d1;
