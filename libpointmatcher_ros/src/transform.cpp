@@ -37,6 +37,7 @@ namespace PointMatcher_ros
 	template<typename T>
 	typename PointMatcher<T>::TransformationParameters transformStampedTransformToTransformationParameters(const tf::TransformListener &listener, const std::string& target, ros::Time target_time, const std::string& source, const ros::Time source_time, const std::string& reference)
 	{
+		// this function allows to search for transforms between frames between different moments in time
 		typedef typename PointMatcher<T>::TransformationParameters TransformationParameters;
 		
 		tf::StampedTransform stampedTr;
